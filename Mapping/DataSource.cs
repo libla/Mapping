@@ -5,15 +5,27 @@ using System.Data.Common;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace System
 {
+	[Serializable]
 	public sealed class LockException : Exception
 	{
 		internal LockException(DbException exception) : base(exception.Message) { }
+
+		private LockException(SerializationInfo info, StreamingContext context) : base(info, context)
+		{
+
+		}
+
+		public override void GetObjectData(SerializationInfo info, StreamingContext context)
+		{
+			base.GetObjectData(info, context);
+		}
 	}
 }
 
@@ -62,7 +74,7 @@ namespace Mapping
 			private readonly DataTable.Writer writer;
 			private T value;
 
-			public Reader(DataTable.Define define, DataSource source, DbConnection connection, Action<DbConnection> close, DbDataReader reader)
+			internal Reader(DataTable.Define define, DataSource source, DbConnection connection, Action<DbConnection> close, DbDataReader reader)
 			{
 				this.define = define;
 				this.source = source;
@@ -175,18 +187,14 @@ namespace Mapping
 			{
 				Command command = _datasource.Save(DataTable.DefineOf<T>.Define, DataTable.ReadOf<T>.Create(value));
 				using (command)
-				{
 					await _datasource.Execute(command, _create, _close);
-				}
 			}
 
 			public async Task Delete<T>(Expression<Func<T, bool>> predicate)
 			{
 				Command command = _datasource.Delete(DataTable.DefineOf<T>.Define, predicate);
 				using (command)
-				{
 					await _datasource.Execute(command, _create, _close);
-				}
 			}
 
 			public async Task<Reader<T>> Search<T>(Expression<Func<T, bool>> predicate) where T : new()
@@ -194,9 +202,7 @@ namespace Mapping
 				DataTable.Define define = DataTable.DefineOf<T>.Define;
 				Command command = _datasource.Search(define, predicate, null);
 				using (command)
-				{
 					return await _datasource.Query<T>(define, command, _create, _close);
-				}
 			}
 
 			public async Task<Reader<T>> Search<T>(Expression<Func<T, bool>> predicate, uint count) where T : new()
@@ -204,8 +210,33 @@ namespace Mapping
 				DataTable.Define define = DataTable.DefineOf<T>.Define;
 				Command command = _datasource.Search(define, predicate, count);
 				using (command)
-				{
 					return await _datasource.Query<T>(define, command, _create, _close);
+			}
+
+			public async Task<long> Count<T>(Expression<Func<T, bool>> predicate) where T : new()
+			{
+				DataTable.Define define = DataTable.DefineOf<T>.Define;
+				Command command = _datasource.Count(define, predicate);
+				using (command)
+				{
+					DbConnection connection = await _create();
+					try
+					{
+						using (DbDataReader reader = _datasource.Token.HasValue
+							? await command.Query(connection, _datasource.Token.Value)
+							: await command.Query(connection))
+						{
+							if (_datasource.Token.HasValue)
+								await reader.ReadAsync(_datasource.Token.Value);
+							else
+								await reader.ReadAsync();
+							return reader.GetInt64(0);
+						}
+					}
+					finally
+					{
+						_close(connection);
+					}
 				}
 			}
 
@@ -214,9 +245,7 @@ namespace Mapping
 			{
 				Command command = _datasource.Update(DataTable.DefineOf<T>.Define, expr, predicate);
 				using (command)
-				{
 					await _datasource.Execute(command, _create, _close);
-				}
 			}
 		}
 
@@ -270,7 +299,7 @@ namespace Mapping
 					{
 						if (i != 0)
 							buffer.buffer.Append(", ");
-						buffer.buffer.Append(EscapeColumn(define.Columns[i].name));
+						buffer.buffer.Append(EscapeColumn(define.Columns[i]));
 					}
 					str.Columns = buffer.buffer.ToString();
 					buffer.buffer.Clear();
@@ -282,7 +311,7 @@ namespace Mapping
 							if (i != 0)
 								buffer.buffer.Append(", ");
 							DataTable.ColumnOrder order = define.Orders[i];
-							buffer.buffer.AppendFormat("{0} {1}", EscapeColumn(define.Columns[order.index].name),
+							buffer.buffer.AppendFormat("{0} {1}", EscapeColumn(define.Columns[order.index]),
 														order.order == DataTable.Order.DESC ? "DESC" : "ASC");
 						}
 					}
@@ -299,13 +328,13 @@ namespace Mapping
 
 		void IDisposable.Dispose()
 		{
-			Close();
+			GC.SuppressFinalize(this);
+			Dispose(true);
 		}
 
 		public void Close()
 		{
-			GC.SuppressFinalize(this);
-			Dispose(true);
+			((IDisposable)this).Dispose();
 		}
 
 		public Task Initialize<T>()
@@ -331,9 +360,7 @@ namespace Mapping
 			using (Parameters parameters = CreateParameters())
 				command = CreateCommand(sql, parameters);
 			using (command)
-			{
 				await Execute(command);
-			}
 		}
 
 		public async Task<Reader<T>> Query<T>(string sql) where T : new()
@@ -342,36 +369,36 @@ namespace Mapping
 			using (Parameters parameters = CreateParameters())
 				command = CreateCommand(sql, parameters);
 			using (command)
-			{
 				return await Query<T>(DataTable.DefineOf<T>.Define, command);
-			}
 		}
 
 		public async Task Save<T>(T value)
 		{
 			Command command = Save(DataTable.DefineOf<T>.Define, DataTable.ReadOf<T>.Create(value));
 			using (command)
-			{
 				await Execute(command);
-			}
 		}
 
 		public async Task Update<T>(Expression<Func<T, T>> expr, Expression<Func<T, bool>> predicate)
 		{
 			Command command = Update(DataTable.DefineOf<T>.Define, expr, predicate);
 			using (command)
-			{
 				await Execute(command);
-			}
 		}
 
 		public async Task Delete<T>(Expression<Func<T, bool>> predicate)
 		{
 			Command command = Delete(DataTable.DefineOf<T>.Define, predicate);
 			using (command)
-			{
 				await Execute(command);
-			}
+		}
+
+		public async Task<Reader<T>> Search<T>() where T : new()
+		{
+			DataTable.Define define = DataTable.DefineOf<T>.Define;
+			Command command = Search(define, null);
+			using (command)
+				return await Query<T>(define, command);
 		}
 
 		public async Task<Reader<T>> Search<T>(Expression<Func<T, bool>> predicate) where T : new()
@@ -379,9 +406,15 @@ namespace Mapping
 			DataTable.Define define = DataTable.DefineOf<T>.Define;
 			Command command = Search(define, predicate, null);
 			using (command)
-			{
 				return await Query<T>(define, command);
-			}
+		}
+
+		public async Task<Reader<T>> Search<T>(uint count) where T : new()
+		{
+			DataTable.Define define = DataTable.DefineOf<T>.Define;
+			Command command = Search(define, count);
+			using (command)
+				return await Query<T>(define, command);
 		}
 
 		public async Task<Reader<T>> Search<T>(Expression<Func<T, bool>> predicate, uint count) where T : new()
@@ -389,8 +422,33 @@ namespace Mapping
 			DataTable.Define define = DataTable.DefineOf<T>.Define;
 			Command command = Search(define, predicate, count);
 			using (command)
-			{
 				return await Query<T>(define, command);
+		}
+
+		public async Task<long> Count<T>(Expression<Func<T, bool>> predicate) where T : new()
+		{
+			DataTable.Define define = DataTable.DefineOf<T>.Define;
+			Command command = Count(define, predicate);
+			using (command)
+			{
+				DbConnection connection = await _create();
+				try
+				{
+					using (DbDataReader reader = Token.HasValue
+						? await command.Query(connection, Token.Value)
+						: await command.Query(connection))
+					{
+						if (Token.HasValue)
+							await reader.ReadAsync(Token.Value);
+						else
+							await reader.ReadAsync();
+						return reader.GetInt64(0);
+					}
+				}
+				finally
+				{
+					_close(connection);
+				}
 			}
 		}
 
@@ -406,10 +464,10 @@ namespace Mapping
 			{
 				Expression<Func<DataSource, Task>> task = tasks[i];
 				if (task.Body.NodeType != ExpressionType.Call)
-					throw new ArgumentException();
+					throw new ArgumentException("Body is not call", nameof(tasks));
 				MethodCallExpression call = task.Body as MethodCallExpression;
 				if (call == null || !call.Method.IsGenericMethod || !commits.Contains(call.Method.GetGenericMethodDefinition()))
-					throw new ArgumentException();
+					throw new ArgumentException("Body is not call", nameof(tasks));
 				MethodInfo method = call.Method;
 				Type type = method.GetGenericArguments()[0];
 				DataTable.Define define = DataTable.Define.Get(type);
@@ -495,9 +553,7 @@ namespace Mapping
 						if (i != 0)
 							buffer.buffer.Append(", ");
 						DataTable.Column column = define.Columns[i];
-						buffer.buffer.AppendFormat("{0} {1}", EscapeColumn(column.name), ColumnType(column));
-						if (column.type != DataTable.Type.String && column.type != DataTable.Type.Bytes)
-							buffer.buffer.Append(" NOT NULL");
+						buffer.buffer.AppendFormat("{0} {1}", EscapeColumn(column), ColumnType(column));
 					}
 					if (define.Keys.Count != 0)
 					{
@@ -507,7 +563,7 @@ namespace Mapping
 							if (i != 0)
 								buffer.buffer.Append(", ");
 							DataTable.Column column = define.Columns[define.Keys[i]];
-							buffer.buffer.Append(EscapeColumn(column.name));
+							buffer.buffer.Append(EscapeColumn(column));
 						}
 						buffer.buffer.Append(")");
 					}
@@ -522,7 +578,7 @@ namespace Mapping
 							if (j != 0)
 								buffer.buffer.Append(", ");
 							DataTable.Column column = define.Columns[index[j]];
-							buffer.buffer.Append(EscapeColumn(column.name));
+							buffer.buffer.Append(EscapeColumn(column));
 						}
 						buffer.buffer.Append(");");
 					}
@@ -616,62 +672,80 @@ namespace Mapping
 							{
 							case DataTable.Type.Bool:
 								{
-									bool result = false;
+									bool? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.Int:
 								{
-									int result = 0;
+									int? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.UInt:
 								{
-									uint result = 0;
+									uint? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.Long:
 								{
-									long result = 0;
+									long? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.ULong:
 								{
-									ulong result = 0;
+									ulong? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.Double:
 								{
-									double result = 0;
+									double? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.String:
@@ -681,17 +755,23 @@ namespace Mapping
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result, values.buffer);
 								}
 								break;
 							case DataTable.Type.DateTime:
 								{
-									DateTime result = DateTime.UtcNow;
+									DateTime? result = null;
 									if (!reader.Get(i, ref result))
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									ToString(result, values.buffer);
+									if (result == null)
+										values.buffer.Append("NULL");
+									else
+										ToString(result.Value, values.buffer);
 								}
 								break;
 							case DataTable.Type.Bytes:
@@ -701,15 +781,22 @@ namespace Mapping
 										continue;
 									if (index != 0)
 										values.buffer.Append(", ");
-									int count = parameters.Count;
-									values.buffer.Append(Placeholder(count));
-									parameters.Add(count, result);
+									if (result == null)
+									{
+										values.buffer.Append("NULL");
+									}
+									else
+									{
+										int count = parameters.Count;
+										values.buffer.Append(Placeholder(count));
+										parameters.Add(count, result);
+									}
 								}
 								break;
 							}
 							if (index != 0)
 								columns.buffer.Append(", ");
-							columns.buffer.Append(EscapeColumn(column.name));
+							columns.buffer.Append(EscapeColumn(column));
 							++index;
 						}
 						buffer.buffer.AppendFormat("INSERT INTO {0} ({1}) VALUES ({2});", EscapeTable(NameMapping(define)),
@@ -774,6 +861,25 @@ namespace Mapping
 			return command;
 		}
 
+		private Command Search(DataTable.Define define, uint? count)
+		{
+			Command command;
+			using (Buffer buffer = Acquire())
+			{
+				using (Parameters parameters = CreateParameters())
+				{
+					ColumnString str = GetColumnString(define);
+					buffer.buffer.AppendFormat("SELECT {0} FROM {1}", str.Columns, EscapeTable(NameMapping(define)));
+					buffer.buffer.Append(str.Orders);
+					if (count.HasValue)
+						LimitCount(buffer.buffer, count.Value);
+					buffer.buffer.Append(';');
+					command = CreateCommand(buffer.buffer.ToString(), parameters);
+				}
+			}
+			return command;
+		}
+
 		private Command Search(DataTable.Define define, LambdaExpression predicate, uint? count)
 		{
 			Command command;
@@ -787,6 +893,22 @@ namespace Mapping
 					buffer.buffer.Append(str.Orders);
 					if (count.HasValue)
 						LimitCount(buffer.buffer, count.Value);
+					buffer.buffer.Append(';');
+					command = CreateCommand(buffer.buffer.ToString(), parameters);
+				}
+			}
+			return command;
+		}
+
+		private Command Count(DataTable.Define define, LambdaExpression predicate)
+		{
+			Command command;
+			using (Buffer buffer = Acquire())
+			{
+				using (Parameters parameters = CreateParameters())
+				{
+					buffer.buffer.AppendFormat("SELECT count(*) FROM {0} ", EscapeTable(NameMapping(define)));
+					Where(define, predicate, buffer.buffer, parameters);
 					buffer.buffer.Append(';');
 					command = CreateCommand(buffer.buffer.ToString(), parameters);
 				}
@@ -809,7 +931,7 @@ namespace Mapping
 
 		protected abstract string ColumnType(DataTable.Column column);
 		protected abstract string EscapeTable(string s);
-		protected abstract string EscapeColumn(string s);
+		protected abstract string EscapeColumn(DataTable.Column column);
 		protected abstract string Placeholder(int index);
 		protected abstract void ToString(bool b, StringBuilder builder);
 		protected abstract void ToString(int i, StringBuilder builder);
@@ -820,33 +942,45 @@ namespace Mapping
 		protected abstract void ToString(string s, StringBuilder builder);
 		protected abstract void ToString(DateTime d, StringBuilder builder);
 
-		protected virtual bool ReadBoolean(DbDataReader reader, int index)
+		protected virtual bool? ReadBoolean(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return reader.GetBoolean(index);
 		}
 
-		protected virtual int ReadInt(DbDataReader reader, int index)
+		protected virtual int? ReadInt(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return reader.GetInt32(index);
 		}
 
-		protected virtual uint ReadUInt(DbDataReader reader, int index)
+		protected virtual uint? ReadUInt(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return (uint)reader.GetInt32(index);
 		}
 
-		protected virtual long ReadLong(DbDataReader reader, int index)
+		protected virtual long? ReadLong(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return reader.GetInt64(index);
 		}
 
-		protected virtual ulong ReadULong(DbDataReader reader, int index)
+		protected virtual ulong? ReadULong(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return (ulong)reader.GetInt64(index);
 		}
 
-		protected virtual double ReadDouble(DbDataReader reader, int index)
+		protected virtual double? ReadDouble(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return reader.GetDouble(index);
 		}
 
@@ -857,15 +991,14 @@ namespace Mapping
 			return reader.GetString(index);
 		}
 
-		protected virtual DateTime ReadDateTime(DbDataReader reader, int index)
-		{
-			return reader.GetDateTime(index);
-		}
+		protected abstract DateTime? ReadDateTime(DbDataReader reader, int index);
 
 		protected virtual byte[] ReadBytes(DbDataReader reader, int index)
 		{
 			if (reader.IsDBNull(index))
+#pragma warning disable S1168 // Empty arrays and collections should be returned instead of null
 				return null;
+#pragma warning restore S1168 // Empty arrays and collections should be returned instead of null
 			long length = reader.GetBytes(index, 0, null, 0, 0);
 			byte[] result = new byte[length];
 			if (reader.GetBytes(index, 0, result, 0, result.Length) != length)
@@ -886,14 +1019,14 @@ namespace Mapping
 						if (i != 0)
 							builder.Append(", ");
 						MemberAssignment member = (MemberAssignment)init.Bindings[i];
-						builder.Append(EscapeColumn(define.Columns[define.Members[member.Member]].name));
+						builder.Append(EscapeColumn(define.Columns[define.Members[member.Member]]));
 						builder.Append(" = ");
 						ToString(define, member.Expression, builder, parameters);
 					}
 					return;
 				}
 			}
-			throw new ArgumentException();
+			throw new ArgumentException("Set is not init", nameof(expression));
 		}
 
 		private void Where(
@@ -918,7 +1051,7 @@ namespace Mapping
 					MemberExpression member = (MemberExpression)expression;
 					if (member.Expression.NodeType == ExpressionType.Parameter)
 					{
-						builder.Append(EscapeColumn(define.Columns[define.Members[member.Member]].name));
+						builder.Append(EscapeColumn(define.Columns[define.Members[member.Member]]));
 						return;
 					}
 				}
@@ -997,9 +1130,12 @@ namespace Mapping
 						case TypeCode.String:
 							ToString((string)constant.Value, builder);
 							break;
+						case TypeCode.DateTime:
+							ToString((DateTime)constant.Value, builder);
+							break;
 						default:
 							if (expression.Type != typeof(byte[]))
-								throw new ArgumentException();
+								throw new ArgumentException("Type mismatching", nameof(expression));
 							byte[] bytes = (byte[])constant.Value;
 							int index = parameters.Count;
 							builder.Append(Placeholder(index));
@@ -1141,6 +1277,17 @@ namespace Mapping
 					{
 						Expression left = binary.Left;
 						Expression right = binary.Right;
+						if ((expression.NodeType == ExpressionType.Equal || expression.NodeType == ExpressionType.NotEqual) && right.NodeType == ExpressionType.Constant && ((ConstantExpression)right).Value == null)
+						{
+							builder.Append("(");
+							ToString(define, left, builder, parameters);
+							if (expression.NodeType == ExpressionType.Equal)
+								builder.Append(" IS NULL");
+							else
+								builder.Append(" IS NOT NULL");
+							builder.Append(")");
+							return;
+						}
 						string op = GetOp(expression.NodeType, ref left, ref right);
 						if (op != null)
 						{
@@ -1155,59 +1302,223 @@ namespace Mapping
 				}
 				break;
 			}
-			switch (Type.GetTypeCode(expression.Type))
+			Type ctype = expression.Type;
+			bool notnull = true;
+			if (ctype.IsGenericType && ctype.GetGenericTypeDefinition() == typeof(Nullable<>))
+			{
+				ctype = ctype.GetGenericArguments()[0];
+				notnull = false;
+			}
+			switch (Type.GetTypeCode(ctype))
 			{
 			case TypeCode.Boolean:
-				ToString(ExecuteValue<bool>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<bool>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<bool?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Byte:
-				ToString((uint)ExecuteValue<byte>(expression), builder);
+				if (notnull)
+				{
+					ToString((uint)ExecuteValue<byte>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<byte?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString((uint)value.Value, builder);
+				}
 				break;
 			case TypeCode.SByte:
-				ToString(ExecuteValue<sbyte>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<sbyte>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<sbyte?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Int16:
-				ToString(ExecuteValue<short>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<short>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<short?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.UInt16:
-				ToString((uint)ExecuteValue<ushort>(expression), builder);
+				if (notnull)
+				{
+					ToString((uint)ExecuteValue<ushort>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<ushort?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString((uint)value.Value, builder);
+				}
 				break;
 			case TypeCode.Int32:
-				ToString(ExecuteValue<int>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<int>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<int?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.UInt32:
-				ToString(ExecuteValue<uint>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<uint>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<uint?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Int64:
-				ToString(ExecuteValue<long>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<long>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<long?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.UInt64:
-				ToString(ExecuteValue<ulong>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<ulong>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<ulong?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Single:
-				ToString(ExecuteValue<float>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<float>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<float?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Decimal:
-				ToString((double)ExecuteValue<decimal>(expression), builder);
+				if (notnull)
+				{
+					ToString((double)ExecuteValue<decimal>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<decimal?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString((double)value.Value, builder);
+				}
 				break;
 			case TypeCode.Double:
-				ToString(ExecuteValue<double>(expression), builder);
+				if (notnull)
+				{
+					ToString(ExecuteValue<double>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<double?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
+				}
 				break;
 			case TypeCode.Char:
-				ToString(new string(ExecuteValue<char>(expression), 1), builder);
+				if (notnull)
+				{
+					ToString(new string(ExecuteValue<char>(expression), 1), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<char?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(new string(value.Value, 1), builder);
+				}
 				break;
 			case TypeCode.String:
 				{
-					string s = ExecuteValue<string>(expression);
-					if (s == null)
+					string value = ExecuteValue<string>(expression);
+					if (value == null)
 						builder.Append("NULL");
 					else
-						ToString(s, builder);
+						ToString(value, builder);
+				}
+				break;
+			case TypeCode.DateTime:
+				if (notnull)
+				{
+					ToString(ExecuteValue<DateTime>(expression), builder);
+				}
+				else
+				{
+					var value = ExecuteValue<DateTime?>(expression);
+					if (value == null)
+						builder.Append("NULL");
+					else
+						ToString(value.Value, builder);
 				}
 				break;
 			default:
-				if (expression.Type != typeof(byte[]))
-					throw new ArgumentException();
+				if (ctype != typeof(byte[]))
+					throw new ArgumentException("Type mismatching", nameof(expression));
 				byte[] bytes = ExecuteValue<byte[]>(expression);
 				if (bytes == null)
 				{

@@ -2,7 +2,12 @@
 <Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
 	<Costura>
 		<IncludeAssemblies>
-			MySql.Data
+			MySqlConnector
+			System.Buffers
+			System.Memory
+			System.Numerics.Vectors
+			System.Runtime.CompilerServices.Unsafe
+			System.Threading.Tasks.Extensions
 		</IncludeAssemblies>
 	</Costura>
 </Weavers>

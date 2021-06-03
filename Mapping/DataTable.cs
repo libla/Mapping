@@ -52,6 +52,7 @@ namespace Mapping
 			public Type type;
 			public bool key;
 			public bool index;
+			public bool notnull;
 		}
 
 		public struct ColumnOrder
@@ -160,58 +161,58 @@ namespace Mapping
 
 			private static class Read<T>
 			{
-				public static Func<Delegate, Reader> Factory = action => ReadOf<T>.Create(((Func<T>)action)());
+				public static readonly Func<Delegate, Reader> Factory = action => ReadOf<T>.Create(((Func<T>)action)());
 			}
 
 			private static class Write<T> where T : new()
 			{
-				public static Func<Delegate, Writer> Factory = action => WriteOf<T>.Create((Func<T, bool>)action);
+				public static readonly Func<Delegate, Writer> Factory = action => WriteOf<T>.Create((Func<T, bool>)action);
 			}
 		}
 
 		public abstract class Reader
 		{
-			public abstract bool Get(int index, ref bool b);
-			public abstract bool Get(int index, ref int i);
-			public abstract bool Get(int index, ref uint u);
-			public abstract bool Get(int index, ref long l);
-			public abstract bool Get(int index, ref ulong u);
-			public abstract bool Get(int index, ref double d);
+			public abstract bool Get(int index, ref bool? b);
+			public abstract bool Get(int index, ref int? i);
+			public abstract bool Get(int index, ref uint? u);
+			public abstract bool Get(int index, ref long? l);
+			public abstract bool Get(int index, ref ulong? u);
+			public abstract bool Get(int index, ref double? d);
 			public abstract bool Get(int index, ref string s);
-			public abstract bool Get(int index, ref DateTime d);
+			public abstract bool Get(int index, ref DateTime? d);
 			public abstract bool Get(int index, ref byte[] bytes);
 
-			public abstract bool Get(string field, ref bool b);
-			public abstract bool Get(string field, ref int i);
-			public abstract bool Get(string field, ref uint u);
-			public abstract bool Get(string field, ref long l);
-			public abstract bool Get(string field, ref ulong u);
-			public abstract bool Get(string field, ref double d);
+			public abstract bool Get(string field, ref bool? b);
+			public abstract bool Get(string field, ref int? i);
+			public abstract bool Get(string field, ref uint? u);
+			public abstract bool Get(string field, ref long? l);
+			public abstract bool Get(string field, ref ulong? u);
+			public abstract bool Get(string field, ref double? d);
 			public abstract bool Get(string field, ref string s);
-			public abstract bool Get(string field, ref DateTime d);
+			public abstract bool Get(string field, ref DateTime? d);
 			public abstract bool Get(string field, ref byte[] bytes);
 		}
 
 		public abstract class Writer
 		{
-			public abstract bool Set(int index, bool b);
-			public abstract bool Set(int index, int i);
-			public abstract bool Set(int index, uint u);
-			public abstract bool Set(int index, long l);
-			public abstract bool Set(int index, ulong u);
-			public abstract bool Set(int index, double d);
+			public abstract bool Set(int index, bool? b);
+			public abstract bool Set(int index, int? i);
+			public abstract bool Set(int index, uint? u);
+			public abstract bool Set(int index, long? l);
+			public abstract bool Set(int index, ulong? u);
+			public abstract bool Set(int index, double? d);
 			public abstract bool Set(int index, string s);
-			public abstract bool Set(int index, DateTime d);
+			public abstract bool Set(int index, DateTime? d);
 			public abstract bool Set(int index, byte[] bytes);
 
-			public abstract bool Set(string field, bool b);
-			public abstract bool Set(string field, int i);
-			public abstract bool Set(string field, uint u);
-			public abstract bool Set(string field, long l);
-			public abstract bool Set(string field, ulong u);
-			public abstract bool Set(string field, double d);
+			public abstract bool Set(string field, bool? b);
+			public abstract bool Set(string field, int? i);
+			public abstract bool Set(string field, uint? u);
+			public abstract bool Set(string field, long? l);
+			public abstract bool Set(string field, ulong? u);
+			public abstract bool Set(string field, double? d);
 			public abstract bool Set(string field, string s);
-			public abstract bool Set(string field, DateTime d);
+			public abstract bool Set(string field, DateTime? d);
 			public abstract bool Set(string field, byte[] bytes);
 
 			public abstract void Prepare();
@@ -243,6 +244,7 @@ namespace Mapping
 							if (column != null)
 							{
 								string columnname = column.Name ?? member.Name;
+								bool notnull = true;
 								Type columntype;
 								if (column.Type != Type.NULL)
 								{
@@ -253,6 +255,11 @@ namespace Mapping
 									SystemType ctype = member.MemberType == MemberTypes.Field
 										? ((FieldInfo)member).FieldType
 										: ((PropertyInfo)member).PropertyType;
+									if (ctype.IsGenericType && ctype.GetGenericTypeDefinition() == typeof(Nullable<>))
+									{
+										ctype = ctype.GetGenericArguments()[0];
+										notnull = false;
+									}
 									switch (SystemType.GetTypeCode(ctype))
 									{
 									case TypeCode.Boolean:
@@ -280,14 +287,18 @@ namespace Mapping
 										columntype = Type.Double;
 										break;
 									case TypeCode.Char:
+										columntype = Type.String;
+										break;
 									case TypeCode.String:
 										columntype = Type.String;
+										notnull = false;
 										break;
 									case TypeCode.DateTime:
 										columntype = Type.DateTime;
 										break;
 									default:
 										columntype = Type.Bytes;
+										notnull = false;
 										break;
 									}
 								}
@@ -321,6 +332,7 @@ namespace Mapping
 									type = columntype,
 									key = isKey,
 									index = hasIndex,
+									notnull = notnull,
 								});
 							}
 						}
@@ -360,28 +372,28 @@ namespace Mapping
 					switch (column.type)
 					{
 					case Type.Bool:
-						getters.Add(Create<bool>(member));
+						getters.Add(column.notnull ? Create<bool>(member) : Create<bool?>(member));
 						break;
 					case Type.Int:
-						getters.Add(Create<int>(member));
+						getters.Add(column.notnull ? Create<int>(member) : Create<int?>(member));
 						break;
 					case Type.UInt:
-						getters.Add(Create<uint>(member));
+						getters.Add(column.notnull ? Create<uint>(member) : Create<uint?>(member));
 						break;
 					case Type.Long:
-						getters.Add(Create<long>(member));
+						getters.Add(column.notnull ? Create<long>(member) : Create<long?>(member));
 						break;
 					case Type.ULong:
-						getters.Add(Create<ulong>(member));
+						getters.Add(column.notnull ? Create<ulong>(member) : Create<ulong?>(member));
 						break;
 					case Type.Double:
-						getters.Add(Create<double>(member));
+						getters.Add(column.notnull ? Create<double>(member) : Create<double?>(member));
 						break;
 					case Type.String:
 						getters.Add(Create<string>(member));
 						break;
 					case Type.DateTime:
-						getters.Add(Create<DateTime>(member));
+						getters.Add(column.notnull ? Create<DateTime>(member) : Create<DateTime?>(member));
 						break;
 					default:
 						getters.Add(Create<byte[]>(member));
@@ -463,58 +475,107 @@ namespace Mapping
 			{
 				public T value;
 
-				public override bool Get(int index, ref bool b)
+
+				public override bool Get(int index, ref bool? b)
 				{
-					Getter<bool> func = Getters[index] as Getter<bool>;
-					if (func == null)
-						return false;
-					b = func(ref value);
-					return true;
+					Getter<bool> funcnotnull = Getters[index] as Getter<bool>;
+					if (funcnotnull != null)
+					{
+						b = funcnotnull(ref value);
+						return true;
+					}
+					Getter<bool?> funcnull = Getters[index] as Getter<bool?>;
+					if (funcnull != null)
+					{
+						b = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Get(int index, ref int i)
+				public override bool Get(int index, ref int? i)
 				{
-					Getter<int> func = Getters[index] as Getter<int>;
-					if (func == null)
-						return false;
-					i = func(ref value);
-					return true;
+					Getter<int> funcnotnull = Getters[index] as Getter<int>;
+					if (funcnotnull != null)
+					{
+						i = funcnotnull(ref value);
+						return true;
+					}
+					Getter<int?> funcnull = Getters[index] as Getter<int?>;
+					if (funcnull != null)
+					{
+						i = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Get(int index, ref uint u)
+				public override bool Get(int index, ref uint? u)
 				{
-					Getter<uint> func = Getters[index] as Getter<uint>;
-					if (func == null)
-						return false;
-					u = func(ref value);
-					return true;
+					Getter<uint> funcnotnull = Getters[index] as Getter<uint>;
+					if (funcnotnull != null)
+					{
+						u = funcnotnull(ref value);
+						return true;
+					}
+					Getter<uint?> funcnull = Getters[index] as Getter<uint?>;
+					if (funcnull != null)
+					{
+						u = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Get(int index, ref long l)
+				public override bool Get(int index, ref long? l)
 				{
-					Getter<long> func = Getters[index] as Getter<long>;
-					if (func == null)
-						return false;
-					l = func(ref value);
-					return true;
+					Getter<long> funcnotnull = Getters[index] as Getter<long>;
+					if (funcnotnull != null)
+					{
+						l = funcnotnull(ref value);
+						return true;
+					}
+					Getter<long?> funcnull = Getters[index] as Getter<long?>;
+					if (funcnull != null)
+					{
+						l = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Get(int index, ref ulong u)
+				public override bool Get(int index, ref ulong? u)
 				{
-					Getter<ulong> func = Getters[index] as Getter<ulong>;
-					if (func == null)
-						return false;
-					u = func(ref value);
-					return true;
+					Getter<ulong> funcnotnull = Getters[index] as Getter<ulong>;
+					if (funcnotnull != null)
+					{
+						u = funcnotnull(ref value);
+						return true;
+					}
+					Getter<ulong?> funcnull = Getters[index] as Getter<ulong?>;
+					if (funcnull != null)
+					{
+						u = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Get(int index, ref double d)
+				public override bool Get(int index, ref double? d)
 				{
-					Getter<double> func = Getters[index] as Getter<double>;
-					if (func == null)
-						return false;
-					d = func(ref value);
-					return true;
+					Getter<double> funcnotnull = Getters[index] as Getter<double>;
+					if (funcnotnull != null)
+					{
+						d = funcnotnull(ref value);
+						return true;
+					}
+					Getter<double?> funcnull = Getters[index] as Getter<double?>;
+					if (funcnull != null)
+					{
+						d = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
 				public override bool Get(int index, ref string s)
@@ -526,13 +587,21 @@ namespace Mapping
 					return true;
 				}
 
-				public override bool Get(int index, ref DateTime d)
+				public override bool Get(int index, ref DateTime? d)
 				{
-					Getter<DateTime> func = Getters[index] as Getter<DateTime>;
-					if (func == null)
-						return false;
-					d = func(ref value);
-					return true;
+					Getter<DateTime> funcnotnull = Getters[index] as Getter<DateTime>;
+					if (funcnotnull != null)
+					{
+						d = funcnotnull(ref value);
+						return true;
+					}
+					Getter<DateTime?> funcnull = Getters[index] as Getter<DateTime?>;
+					if (funcnull != null)
+					{
+						d = funcnull(ref value);
+						return true;
+					}
+					return false;
 				}
 
 				public override bool Get(int index, ref byte[] bytes)
@@ -544,37 +613,37 @@ namespace Mapping
 					return true;
 				}
 
-				public override bool Get(string field, ref bool b)
+				public override bool Get(string field, ref bool? b)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref b);
 				}
 
-				public override bool Get(string field, ref int i)
+				public override bool Get(string field, ref int? i)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref i);
 				}
 
-				public override bool Get(string field, ref uint u)
+				public override bool Get(string field, ref uint? u)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref u);
 				}
 
-				public override bool Get(string field, ref long l)
+				public override bool Get(string field, ref long? l)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref l);
 				}
 
-				public override bool Get(string field, ref ulong u)
+				public override bool Get(string field, ref ulong? u)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref u);
 				}
 
-				public override bool Get(string field, ref double d)
+				public override bool Get(string field, ref double? d)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref d);
@@ -586,7 +655,7 @@ namespace Mapping
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref s);
 				}
 
-				public override bool Get(string field, ref DateTime d)
+				public override bool Get(string field, ref DateTime? d)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Get(index, ref d);
@@ -625,28 +694,28 @@ namespace Mapping
 					switch (column.type)
 					{
 					case Type.Bool:
-						setters.Add(Create<bool>(member));
+						setters.Add(column.notnull ? Create<bool>(member) : Create<bool?>(member));
 						break;
 					case Type.Int:
-						setters.Add(Create<int>(member));
+						setters.Add(column.notnull ? Create<int>(member) : Create<int?>(member));
 						break;
 					case Type.UInt:
-						setters.Add(Create<uint>(member));
+						setters.Add(column.notnull ? Create<uint>(member) : Create<uint?>(member));
 						break;
 					case Type.Long:
-						setters.Add(Create<long>(member));
+						setters.Add(column.notnull ? Create<long>(member) : Create<long?>(member));
 						break;
 					case Type.ULong:
-						setters.Add(Create<ulong>(member));
+						setters.Add(column.notnull ? Create<ulong>(member) : Create<ulong?>(member));
 						break;
 					case Type.Double:
-						setters.Add(Create<double>(member));
+						setters.Add(column.notnull ? Create<double>(member) : Create<double?>(member));
 						break;
 					case Type.String:
 						setters.Add(Create<string>(member));
 						break;
 					case Type.DateTime:
-						setters.Add(Create<DateTime>(member));
+						setters.Add(column.notnull ? Create<DateTime>(member) : Create<DateTime?>(member));
 						break;
 					default:
 						setters.Add(Create<byte[]>(member));
@@ -676,9 +745,6 @@ namespace Mapping
 			{
 				if (property.GetSetMethod(true) == null)
 					return null;
-				if (property.DeclaringType != typeof(T) && !property.DeclaringType.IsAssignableFrom(typeof(T)))
-					throw new ArgumentException();
-
 				DynamicMethod dm = new DynamicMethod(
 					string.Format("DataTable.Set_{0}.{1}", property.DeclaringType.FullName, property.Name),
 					typeof(void), new SystemType[] {typeof(T).MakeByRefType(), typeof(V)}, property.DeclaringType, true);
@@ -692,9 +758,6 @@ namespace Mapping
 			{
 				if (property.GetSetMethod(true) == null)
 					return null;
-				if (property.DeclaringType != typeof(T) && !property.DeclaringType.IsAssignableFrom(typeof(T)))
-					throw new ArgumentException();
-
 				DynamicMethod dm = new DynamicMethod(
 					string.Format("DataTable.Set_{0}.{1}", property.DeclaringType.FullName, property.Name),
 					typeof(void), new SystemType[] {typeof(T).MakeByRefType(), typeof(byte[])}, property.DeclaringType, true);
@@ -735,58 +798,124 @@ namespace Mapping
 				private T value;
 				public Func<T, bool> action;
 
-				public override bool Set(int index, bool b)
+				public override bool Set(int index, bool? b)
 				{
-					Setter<bool> func = Setters[index] as Setter<bool>;
-					if (func == null)
-						return false;
-					func(ref value, b);
-					return true;
+					if (b != null)
+					{
+						Setter<bool> funcnotnull = Setters[index] as Setter<bool>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, b.Value);
+							return true;
+						}
+					}
+					Setter<bool?> funcnull = Setters[index] as Setter<bool?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, b);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Set(int index, int i)
+				public override bool Set(int index, int? i)
 				{
-					Setter<int> func = Setters[index] as Setter<int>;
-					if (func == null)
-						return false;
-					func(ref value, i);
-					return true;
+					if (i != null)
+					{
+						Setter<int> funcnotnull = Setters[index] as Setter<int>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, i.Value);
+							return true;
+						}
+					}
+					Setter<int?> funcnull = Setters[index] as Setter<int?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, i);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Set(int index, uint u)
+				public override bool Set(int index, uint? u)
 				{
-					Setter<uint> func = Setters[index] as Setter<uint>;
-					if (func == null)
-						return false;
-					func(ref value, u);
-					return true;
+					if (u != null)
+					{
+						Setter<uint> funcnotnull = Setters[index] as Setter<uint>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, u.Value);
+							return true;
+						}
+					}
+					Setter<uint?> funcnull = Setters[index] as Setter<uint?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, u);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Set(int index, long l)
+				public override bool Set(int index, long? l)
 				{
-					Setter<long> func = Setters[index] as Setter<long>;
-					if (func == null)
-						return false;
-					func(ref value, l);
-					return true;
+					if (l != null)
+					{
+						Setter<long> funcnotnull = Setters[index] as Setter<long>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, l.Value);
+							return true;
+						}
+					}
+					Setter<long?> funcnull = Setters[index] as Setter<long?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, l);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Set(int index, ulong u)
+				public override bool Set(int index, ulong? u)
 				{
-					Setter<ulong> func = Setters[index] as Setter<ulong>;
-					if (func == null)
-						return false;
-					func(ref value, u);
-					return true;
+					if (u != null)
+					{
+						Setter<ulong> funcnotnull = Setters[index] as Setter<ulong>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, u.Value);
+							return true;
+						}
+					}
+					Setter<ulong?> funcnull = Setters[index] as Setter<ulong?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, u);
+						return true;
+					}
+					return false;
 				}
 
-				public override bool Set(int index, double d)
+				public override bool Set(int index, double? d)
 				{
-					Setter<double> func = Setters[index] as Setter<double>;
-					if (func == null)
-						return false;
-					func(ref value, d);
-					return true;
+					if (d != null)
+					{
+						Setter<double> funcnotnull = Setters[index] as Setter<double>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, d.Value);
+							return true;
+						}
+					}
+					Setter<double?> funcnull = Setters[index] as Setter<double?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, d);
+						return true;
+					}
+					return false;
 				}
 
 				public override bool Set(int index, string s)
@@ -798,13 +927,24 @@ namespace Mapping
 					return true;
 				}
 
-				public override bool Set(int index, DateTime d)
+				public override bool Set(int index, DateTime? d)
 				{
-					Setter<DateTime> func = Setters[index] as Setter<DateTime>;
-					if (func == null)
-						return false;
-					func(ref value, d);
-					return true;
+					if (d != null)
+					{
+						Setter<DateTime> funcnotnull = Setters[index] as Setter<DateTime>;
+						if (funcnotnull != null)
+						{
+							funcnotnull(ref value, d.Value);
+							return true;
+						}
+					}
+					Setter<DateTime?> funcnull = Setters[index] as Setter<DateTime?>;
+					if (funcnull != null)
+					{
+						funcnull(ref value, d);
+						return true;
+					}
+					return false;
 				}
 
 				public override bool Set(int index, byte[] bytes)
@@ -816,37 +956,37 @@ namespace Mapping
 					return true;
 				}
 
-				public override bool Set(string field, bool b)
+				public override bool Set(string field, bool? b)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, b);
 				}
 
-				public override bool Set(string field, int i)
+				public override bool Set(string field, int? i)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, i);
 				}
 
-				public override bool Set(string field, uint u)
+				public override bool Set(string field, uint? u)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, u);
 				}
 
-				public override bool Set(string field, long l)
+				public override bool Set(string field, long? l)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, l);
 				}
 
-				public override bool Set(string field, ulong u)
+				public override bool Set(string field, ulong? u)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, u);
 				}
 
-				public override bool Set(string field, double d)
+				public override bool Set(string field, double? d)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, d);
@@ -858,7 +998,7 @@ namespace Mapping
 					return Define.Names.TryGetValue(field, out index) && Set(index, s);
 				}
 
-				public override bool Set(string field, DateTime d)
+				public override bool Set(string field, DateTime? d)
 				{
 					int index;
 					return Define.Names.TryGetValue(field, out index) && Set(index, d);
@@ -950,7 +1090,7 @@ namespace Mapping
 					il.Emit(OpCodes.Ldc_I4_0);
 					break;
 				default:
-					throw new ArgumentException();
+					throw new ArgumentException("Type mismatching", nameof(to));
 				}
 				il.Emit(OpCodes.Ceq);
 				il.Emit(OpCodes.Ldc_I4_0);
@@ -960,7 +1100,7 @@ namespace Mapping
 			{
 				OpCode op = code.ConvertFrom(SystemType.GetTypeCode(from));
 				if (op == OpCodes.Throw)
-					throw new ArgumentException();
+					throw new ArgumentException("Type mismatching", nameof(to));
 				if (op != OpCodes.Nop)
 					il.Emit(op);
 			}

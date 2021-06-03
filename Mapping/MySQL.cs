@@ -42,13 +42,14 @@ namespace Mapping
 		protected override async Task<DbConnection> CreateConnection()
 		{
 			MySqlConnection connection = new MySqlConnection(string.Format(
-																"Data Source = {0};Port = {1};Username = {2};Password = \"{3}\";CharSet = utf8;",
+																"Data Source = {0};Port = {1};Username = {2};Password = \"{3}\";CharSet = utf8mb4;",
 																host, port, username, password.Replace("\"", "\"\"")));
 			if (Token == null)
 				await connection.OpenAsync();
 			else
 				await connection.OpenAsync(Token.Value);
-			string sql = string.Format("CREATE DATABASE IF NOT EXISTS {0};USE {0};", database);
+			TimeSpan timezone = TimeZoneInfo.Local.BaseUtcOffset;
+			string sql = string.Format("SET time_zone = '{1}:{2:00}';CREATE DATABASE IF NOT EXISTS {0};USE {0};", database, (timezone.Hours >= 0 ? "+" : "") + timezone.Hours.ToString(), Math.Abs(timezone.Minutes));
 			DataSource.Command command;
 			using (Parameters parameters = CreateParameters())
 				command = CreateCommand(sql, parameters);
@@ -85,7 +86,7 @@ namespace Mapping
 		{
 			MySqlCommand exist = new MySqlCommand(string.Format(
 													"SELECT count(TABLE_NAME) as result FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{0}' AND TABLE_NAME = '{1}';",
-													database, define.Name), (MySqlConnection)connection);
+													database, NameMapping(define)), (MySqlConnection)connection);
 			try
 			{
 				using (var reader = Token == null
@@ -183,62 +184,80 @@ namespace Mapping
 					{
 					case DataTable.Type.Bool:
 						{
-							bool result = false;
+							bool? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.Int:
 						{
-							int result = 0;
+							int? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.UInt:
 						{
-							uint result = 0;
+							uint? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.Long:
 						{
-							long result = 0;
+							long? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.ULong:
 						{
-							ulong result = 0;
+							ulong? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.Double:
 						{
-							double result = 0;
+							double? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.String:
@@ -248,17 +267,23 @@ namespace Mapping
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result, values.buffer);
 						}
 						break;
 					case DataTable.Type.DateTime:
 						{
-							DateTime result = DateTime.UtcNow;
+							DateTime? result = null;
 							if (!reader.Get(i, ref result))
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							ToString(result, values.buffer);
+							if (result == null)
+								values.buffer.Append("NULL");
+							else
+								ToString(result.Value, values.buffer);
 						}
 						break;
 					case DataTable.Type.Bytes:
@@ -268,15 +293,22 @@ namespace Mapping
 								continue;
 							if (index != 0)
 								values.buffer.Append(", ");
-							int count = parameters.Count;
-							values.buffer.Append(Placeholder(count));
-							parameters.Add(count, result);
+							if (result == null)
+							{
+								values.buffer.Append("NULL");
+							}
+							else
+							{
+								int count = parameters.Count;
+								values.buffer.Append(Placeholder(count));
+								parameters.Add(count, result);
+							}
 						}
 						break;
 					}
 					if (index != 0)
 						columns.buffer.Append(", ");
-					columns.buffer.Append(EscapeColumn(column.name));
+					columns.buffer.Append(EscapeColumn(column));
 					++index;
 				}
 				builder.AppendFormat("REPLACE INTO {0} ({1}) VALUES ({2});", EscapeTable(NameMapping(define)),
@@ -286,28 +318,29 @@ namespace Mapping
 
 		protected override string ColumnType(DataTable.Column column)
 		{
+			string notnull = column.key ? "" : (column.notnull ? " NOT NULL" : " NULL");
 			switch (column.type)
 			{
 			case DataTable.Type.Bool:
-				return "tinyint(1)";
+				return "tinyint(1)" + notnull;
 			case DataTable.Type.Int:
-				return "int(32)";
+				return "int(32)" + notnull;
 			case DataTable.Type.UInt:
-				return "int(32) UNSIGNED";
+				return "int(32) UNSIGNED" + notnull;
 			case DataTable.Type.Long:
-				return "bigint";
+				return "bigint" + notnull;
 			case DataTable.Type.ULong:
-				return "bigint UNSIGNED";
+				return "bigint UNSIGNED" + notnull;
 			case DataTable.Type.Double:
-				return "double";
+				return "double" + notnull;
 			case DataTable.Type.String:
-				return column.key || column.index ? "varchar(255) CHARACTER SET latin1" : "longtext CHARACTER SET utf8";
+				return (column.key || column.index ? "varchar(255) CHARACTER SET latin1" : "longtext CHARACTER SET utf8mb4") + notnull;
 			case DataTable.Type.DateTime:
-				return "datetime";
+				return "timestamp" + notnull + " DEFAULT CURRENT_TIMESTAMP";
 			case DataTable.Type.Bytes:
-				return column.key || column.index ? "varbinary(255)" : "longblob";
+				return (column.key || column.index ? "varbinary(255)" : "longblob") + notnull;
 			default:
-				throw new ArgumentOutOfRangeException();
+				throw new ArgumentOutOfRangeException(nameof(column));
 			}
 		}
 
@@ -316,9 +349,9 @@ namespace Mapping
 			return '`' + s + '`';
 		}
 
-		protected override string EscapeColumn(string s)
+		protected override string EscapeColumn(DataTable.Column column)
 		{
-			return '`' + s + '`';
+			return '`' + column.name + '`';
 		}
 
 		protected override string Placeholder(int index)
@@ -384,19 +417,31 @@ namespace Mapping
 			builder.AppendFormat("'{0:yyyy-MM-dd HH:mm:ss}.{1:000}'", d, d.Millisecond);
 		}
 
-		protected override uint ReadUInt(DbDataReader reader, int index)
+		protected override uint? ReadUInt(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return ((MySqlDataReader)reader).GetUInt32(index);
 		}
 
-		protected override ulong ReadULong(DbDataReader reader, int index)
+		protected override ulong? ReadULong(DbDataReader reader, int index)
 		{
+			if (reader.IsDBNull(index))
+				return null;
 			return ((MySqlDataReader)reader).GetUInt64(index);
 		}
 
-		protected override DateTime ReadDateTime(DbDataReader reader, int index)
+		protected override DateTime? ReadDateTime(DbDataReader reader, int index)
 		{
-			return ((MySqlDataReader)reader).GetDateTime(index);
+			if (reader.IsDBNull(index))
+				return null;
+			DateTime datetime = ((MySqlDataReader)reader).GetDateTime(index);
+			if (datetime.Kind == DateTimeKind.Utc)
+				return datetime.ToLocalTime();
+			else if (datetime.Kind == DateTimeKind.Local)
+				return datetime;
+			else
+				return datetime.ToUniversalTime().ToLocalTime();
 		}
 
 		private new class Command : Parameters, DataSource.Command
